@@ -1,11 +1,12 @@
-import os
+import os;
 #import sys;
 import gc;
 #import time;
 from datetime import datetime;
 import json;
-import torch
-import torch.nn as nn
+import perfparameters;
+import torch;
+import torch.nn as nn;
 import torch.multiprocessing as mp;
 import ray;
 #from ray import tune;
@@ -13,7 +14,7 @@ import ray;
 #for searching fastest storage when OOM situations
 import psutil;
 import tempfile;
-from varname import nameof;
+from varname.core import nameof;
 import uuid;
 import logging;
 from inspect import signature, isfunction, ismethod;
@@ -22,8 +23,12 @@ import signal;
 import abc;
 #do not call multiprocessing directly in windows and jupyter. wrap with if __name__=="__main__", else child process generate same as parent infinite
 cpuworkers=mp.cpu_count();
-gpuworkers=torch.cuda.device_count() if torch.cuda.is_available() else 0;
-mp.set_start_method("spawn", force=True);
+gpuworkers=torch.cuda.device_count() if torch.cuda.is_available() else -1;
+#OS memory allocation and multiprocessing method setting
+if os.name=="nt":
+    mp.set_start_method(method="spawn", force=True);
+else:
+    mp.set_start_method(method="fork", force=True);
 
 def istensorable(obj):
     try:
@@ -32,7 +37,42 @@ def istensorable(obj):
     except (TypeError, ValueError):
         return False;
 
+ramthreashold=psutil.virtual_memory().total*perfparameters.cpu_reserve_fraction;
+vramthreshold=[torch.cuda.max_memory_allocated(ind) for ind in range(torch.cuda.device_count())] if torch.cuda.is_available() else [0];
+
+def release_ram():
+    """release cpu ram and return memory usage values.
+
+    Returns:
+        int: released cpu ram amounts in bytes.
+    """
+    used=psutil.virtual_memory().used;
+    gc.collect();
+    cleaned=psutil.virtual_memory().used;
+    return used-cleaned;
+
+def release_vram(deviceid=None):
+    """release vram and return memory usage values. can be used for multiple cuda devices.
+
+    Args:
+        deviceid (positive int, optional): target cuda device id. Defaults to None, then all devices.
+
+    Returns:
+        list: released vram amounts in bytes. index is cuda device number.
+    """
+    if not torch.cuda.is_available():
+        return [0];
+    cudanums = torch.cuda.device_count() if deviceid is None else deviceid;
+    used_memory=[];
+    for ind in range(cudanums+1):
+        used_memory.append(torch.cuda.memory_allocated(ind));
+        torch.cuda.empty_cache();
+        used_memory[ind]=used_memory[ind]-torch.cuda.memory_allocated(ind);
+    return used_memory;
+
 class FileManager():
+    """filepath manager / Storage management prototype during multiprocessing.
+    """
     def __init__(self):
         self.files = set()
 
@@ -51,6 +91,8 @@ class FileManager():
         self.files = set(state.get("files", []))
 
     def _interupthandler(self):
+        """detector of interrupts of main process.
+        """
         signals=[signal.SIGINT, signal.SIGTERM];
         if os.name=="nt":
             signals.append(signal.SIGBREAK);
@@ -58,12 +100,19 @@ class FileManager():
             signal.signal(sig, self._exithandle);
         
     def _exithandle(self, signum, frame):
+        """resource release handler as closer, including ray shutdown
+
+        Args:
+            signum (signal): _description_
+            frame (_type_): _description_
+        """
         self.clear_all();
         if ray.is_initialized():
             ray.shutdown();
         os._exit(1);
 
     def clear_all(self):
+        """whole path cleaner."""
         for path in list(self.files):
             if os.path.exists(path):
                 os.remove(path)
@@ -74,45 +123,29 @@ class ResourceManager(FileManager):
         FileManager.__init__(self);
 
     def release_ram(self):
-        gc.collect()
-        return psutil.virtual_memory().used
+        """release cpu ram and return memory usage values.
 
-    def release_vram(self):
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            total_memory = torch.cuda.get_device_properties(0).total_memory
-            reserved_memory = torch.cuda.memory_reserved(0)
-            return total_memory - reserved_memory
-        return 0
+        Returns:
+            int: released cpu ram amounts in bytes.
+        """
+        return release_ram();
+
+    def release_vram(self, deviceid=None):
+        """release vram and return memory usage values. can be used for multiple cuda devices.
+
+
+        Returns:
+            list: released vram amounts in bytes. index is cuda device number.
+        """
+        return release_vram(deviceid);
     
     def ignore_signals(self):
-        """Ignore termination signals to worker processes: only mainprocess is controlled by interrupthandler based on signal module"""
+        """Ignore termination signals to worker processes: only main process is controlled by interrupt handler based on signal module"""
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         
     def clear_files(self):
-        self.file_manager.clear_all()
-        
-    def get_state(self):
-        return {"file_manager": self.file_manager.get_state()}
-
-    def set_state(self, state):
-        if "file_manager" in state:
-            self.file_manager.set_state(state["file_manager"])
-            
-            
-def get_max_memory(use_gpu=True, reserve_fraction=0.8):
-    """Determine the maximum memory available for a batch."""
-    if use_gpu and torch.cuda.is_available():
-        total_memory = torch.cuda.get_device_properties(0).total_memory
-        reserved_memory = torch.cuda.memory_reserved(0)
-        available_memory = total_memory - reserved_memory
-    else:
-        available_memory = psutil.virtual_memory().available
-    return int(available_memory * reserve_fraction)
-
-ramthreashold=get_max_memory(False);
-vramthreshold=get_max_memory();
+        self.clear_all();
 
 class Cacheing():
     def __init__(self, redihost="localhost", rediport=6379):
@@ -127,9 +160,8 @@ class Cacheing():
     def _get_estimate(self, task_signature):
         """Get average memory usage for a task."""
         key=f"memory_cache:{task_signature}"
-        values=self.redis_client.lrange(key, 0, -1);
-        if values:
-            memvalues=[int(v) for v in values];
+        if values := self.redis_client.execute_command("lrange", key, 0, -1):
+            memvalues = [int(v) for v in values];
             return sum(memvalues) // len(memvalues);
         return None;
         
@@ -137,43 +169,48 @@ class Cacheing():
         cached_memory = self._get_estimate(task_signature)
         if cached_memory is not None:
             return cached_memory  # Use cached memory estimate
-        else:
-            total_memory = ram_used + vram_used
-            self._add(task_signature, total_memory)
-            return total_memory
+        total_memory = ram_used + vram_used
+        self._add(task_signature, total_memory)
+        return total_memory
 
 def check_available_storage():
     """ram and vram usage checking"""
     ramspace=psutil.virtual_memory().available;
-    vramspace=torch.cuda.mem_get_info(torch.cuda.current_device())[0] if torch.cuda.is_available() else 0;
+    vramspace=[torch.cuda.memory_allocated(ind) for ind in range(torch.cuda.device_count())] if torch.cuda.is_available() else [0];
     return ramspace, vramspace;
 
 def find_fastest_storage(forceswapsw=False, testsize=1E6):
-    if check_available_storage()[0]<=ramthreashold and not forceswapsw:
-        return "cpu"
-    if check_available_storage()[1]<=vramthreshold and not forceswapsw:
-        return "cuda";
+    if not forceswapsw:
+        if check_available_storage()[0]<=ramthreashold:
+            """cpu is most preffered due to no limitations of functions"""
+            return "cpu"
+        if torch.cuda.is_available():
+            """vram is 2nd preffered due to limitations of functions. most empty vram is selected"""
+            maxid=check_available_storage()[1].index(max(check_available_storage()[1]));
+            return f"cuda:{maxid}"
     else:
+        """case of storage use because of ram shortage"""
         def find_drives():
             #drive search
             partitions=psutil.disk_partitions();
             drivers=[p.mountpoint for p in partitions if os.access(p.mountpoint, os.W_OK)];
             return drivers;
+
         canditates=find_drives()+["/dev/shm", tempfile.gettempdir(), "/tmp"];
         canditates=[path for path in canditates if os.path.exists(path) and os.access(path, os.W_OK)]
         testdata=b"x"*int(testsize);
-        times={};
+        times=[];
         for path in canditates:
             try:
                 filepath=os.path.join(path, "test.tmp");
-                stime=datetime.now();
+                stime=datetime.now().timestamp();
                 torch.save(testdata, filepath);
-                torch.load(testdata, filepath, weights_only=True);
+                torch.load(filepath, weights_only=True);
                 os.remove(filepath);
-                times[path]=(datetime.now()-stime).total_seconds();
+                times.append(datetime.now().timestamp()-stime);
             except Exception:
-                pass;
-        return min(times.items(), key=times.keys()) if times else tempfile.gettempdir();
+                times.append(datetime.max.timestamp());
+        return canditates[times.index(min(times))] if times else tempfile.gettempdir();
         
 def generate_disk_path(base_path, *file_name):
     return os.path.join(base_path, f"{file_name}.pt");
@@ -184,7 +221,8 @@ def setup_log(log_file):
 def worker_elog(taskid, e):
     logger=logging.getLogger();
     logger.error(f"{taskid}_RAM usage: {check_available_storage()[0] / (1024 * 1024):.2f} MB\n");
-    logger.error(f"{taskid}_VRAM usage: {check_available_storage()[1] / (1024 * 1024):.2f} MB\n");
+    for ind in range(torch.cuda.device_count()+1):
+        logger.error(f"{taskid}_VRAM usage: {check_available_storage()[1][ind] / (1024 * 1024):.2f} MB\n");
     logger.error(f"Worker {taskid} error: {e}");
 
 swapstorage=find_fastest_storage(forceswapsw=True);

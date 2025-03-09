@@ -10,7 +10,7 @@ from torch.utils.data import Dataset, DataLoader;
 import numpy as np;
 import ray;
 from matplotlib import pyplot as plt, font_manager as fm;
-from varname import nameof;
+from varname.core import nameof;
 
 class Pathbuild():
     def __init__(self, pathbyruntime):
@@ -20,10 +20,7 @@ class Pathbuild():
             pathbyruntime (_Bool_): _"True: use"_
         """
         curtimepath=Curtimeout().str;
-        if pathbyruntime:
-            self.curtimepath=curtimepath;
-        else:
-            self.curtimepath=Starttime.str;
+        self.curtimepath = curtimepath if pathbyruntime else Starttime.str;
         
     def stOrtfpathbuild(self, subfolderlist, filename, filetype):
         """do not call this method directly out of the class!"""
@@ -85,11 +82,11 @@ class FileStorageHandle():
     @staticmethod
     def saveto(data, path):
         with open(path, "xt") as f:
-            pickle(data, f);
+            pickle.dump(data, f);
     @staticmethod
     def savetobin(data, path):
         with open(path, "xb") as f:
-            pickle(data, f);
+            pickle.dump(data, f);
     @staticmethod
     def loadf(path):
         if os.path.exists(path):
