@@ -7,7 +7,7 @@ xdist=1.0;
 ywidth=1.0;
 G_N = 1/(16*torch.pi);
 #only for 2d matrix. else, complete one of functions in Unuseds
-tensordotind=([-1], [-1])
+tensordot2dind=([0], [-1])
 
 def ensure_tensordotdim(tensor, target_dimssize):
     """
