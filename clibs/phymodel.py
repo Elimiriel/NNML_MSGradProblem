@@ -94,7 +94,8 @@ class Model_Fn(Integrand):
         #FunctMP.__init__(self, cworkers=cworks, gworkers=gworks);
         self.integrator=integrator;
 
-    def result(self):
+    def __calc__(self):
+        """physical model equation"""
         integrand1, integrand2 = self.integrand1, self.integrand2;
         int_init, int_fin = 0.0, 1.0;
         zs = self.zs
@@ -124,3 +125,7 @@ class Model_Fn(Integrand):
         C_m=self.multiprocessing(self.intergrat, "integrate", kwargs=kwargs2, tensorout=True)-1.0;"""
         S_m = hz*l_m/(2*zs**2) + C_m/zs
         return l_m, S_m
+    
+    def parameters(self):
+        """extracts learnable parameters"""
+        return self.a, self.w, self.b;
