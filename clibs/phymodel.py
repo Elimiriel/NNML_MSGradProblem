@@ -18,38 +18,38 @@ class Metric_GH():
         
     """For gradient tracking, min and max to prevent negative metrics are replaced by if"""
     def metric_G(self, z):#f(z) in paper
-        #upperlimit = 1.0 + torch.tensordot((self.a+1.0), z, dims=tensordotind);
+        #upperlimit = 1.0 + torch.matmul((self.a+1.0), z, dims=tensordotind);
         if self.w.size(dim=-1)!=z.size(dim=-1):
             w=ensure_tensordotdim(self.w, z.size(dim=-1));
         else:
             w=self.w;
         if self.a.size(dim=-1)!=z.size(dim=-1):
-            a=ensure_tensordotdim(a, z.size(dim=-1));
+            a=ensure_tensordotdim(self.a, z.size(dim=-1));
         else:
             a=self.a;
-        z2fz = torch.float_power(z, 2)*torch.tensordot(w, z, dims=tensordotind)+self.b;
+        z2fz = torch.float_power(z, 2)*torch.matmul(w, z)+self.b;
         #if torch.any(z2fz>upperlimit):
         #    z2fz=upperlimit;
-        return (1.0 - z)*( 1.0 + torch.tensordot((self.a+1.0), z, dims=tensordotind) - z2fz);
+        return (1.0 - z)*( 1.0 + torch.matmul((self.a+1.0), z) - z2fz);
     
     def Temperature(self):  # defined by g(z)
         dg = torch.autograd.functional.jacobian(self.metric_G, self.zsinghoriz);#( self.metric_G(one) - self.metric_G(one-eps) ) / eps
         return -dg/(4.0*torch.pi);
     
     def metric_H(self, z): #g(z) in paper
-        #upperlimit = 1.0 + torch.tensordot((self.a+1.0), z, dims=tensordotind);
+        #upperlimit = 1.0 + torch.matmul((self.a+1.0), z, dims=tensordotind);
         if self.w.size(dim=-1)!=z.size(dim=-1):
             w=ensure_tensordotdim(self.w, z.size(dim=-1));
         else:
             w=self.w;
         if self.a.size(dim=-1)!=z.size(dim=-1):
-            a=ensure_tensordotdim(a, z.size(dim=-1));
+            a=ensure_tensordotdim(self.a, z.size(dim=-1));
         else:
             a=self.a;
-        z2fz = torch.float_power(z, 2)*torch.tensordot(w, z, dims=tensordotind)+self.b;
+        z2fz = torch.float_power(z, 2)*torch.matmul(w, z)+self.b;
         #if torch.any(z2fz>upperlimit):
         #    z2fz=upperlimit;
-        return 1.0 + torch.tensordot(a, z, dims=tensordotind) - z2fz;
+        return 1.0 + torch.matmul(a, z) - z2fz;
     
     def EntropyDensity(self):  # defined by h(z)
         h1 = self.metric_H(self.zsinghoriz);
@@ -57,7 +57,6 @@ class Metric_GH():
         
 class Integrand(Metric_GH):
     def __init__(self, zs, a, w, b):
-        nn.Module.__init__(self);
         Metric_GH.__init__(self, zs, a, w, b);
         
     def _interg_commons(self, zs, t):
