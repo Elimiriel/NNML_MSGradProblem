@@ -70,7 +70,7 @@ class DNN(nn.Module):
         layer=torch.full(torch.Size(self.modelclass), 0.0, dtype=torch.float64);
         with ProcessPoolExecutor(max_workers=cpuworkers) as executor:
             """runtime including windows"""
-            process = list(executor.map(self.modelclass, self.z));
+            process = list(executor.map(self.modelclass, self.zt));
             for depth in range(0, len(self.strinfo)):
                 layer=self.activF(self._layer(process, depth));
             executor.shutdown(wait=True);

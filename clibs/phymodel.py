@@ -98,19 +98,21 @@ class Model_Fn(Integrand):
         integrand1, integrand2 = self.integrand1, self.integrand2;
         int_init, int_fin = 0.0, 1.0;
         zs = self.zs
-        intsampleN=max(zs.size().numel());
+        intsampleN=int(zs.numel());
         hz = self.metric_H(zs);
         if intsampleN<30:
-            intsampleN=vErr**-1;
+            intsampleN=int(vErr**-1);
         integrator=self.integrator
         #sample=N;
         l_m, C_m = [], []
-        for i in range(intsampleN):
+        for i in range(0, intsampleN):
             l_m.append( integrator.integrate(integrand1, dim=1, N=intsampleN, integration_domain=[[int_init, int_fin]], backend='torch') )
             C_m.append( -1. + integrator.integrate(integrand2, dim=1, N=intsampleN, integration_domain=[[int_init, int_fin]], backend='torch') )
         l_m, C_m = torch.stack(l_m).median(0).values, torch.stack(C_m).median(0).values
         
-        """if intsampleN>1000:
+        """
+        legacy codes
+        if intsampleN>1000:
             #pararell on each z points
             subdomains=[[start, end] for start, end in zip(torch.linspace(0, zs.max(), intsampleN)[:-2], torch.linspace(0, zs.max(), intsampleN))];
             kwargs1=[{"fn": integrand1, "dim": -1, "N": intsampleN//len(subdomains), "intergration_domain": [domain], "backend": "torch"} for domain in subdomains];
