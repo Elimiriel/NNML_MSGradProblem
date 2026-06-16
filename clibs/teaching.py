@@ -4,7 +4,7 @@ import numpy as np;
 import torch;
 import torch.nn as nn;
 # Define a custom nameof function as an alternative
-from .perfparameters import nameof;
+from process_runtime.precperfs import nameof;
 from .model import DNN;
 from .dataiod import DataIO, ParaPrepset, ParaPrepLoad, TensDFrame;
 from .timegen import Curtimeout, Tpass;

@@ -1,15 +1,20 @@
+from __future__ import annotations
+from collections.abc import Sequence
+from typing import Callable
 import torch
-import torch.nn as nn
+from torch.nn import Module, ReLU, Sequential, Linear, Conv2d, MSELoss
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from tensormultiprocessings import cpuworkers, gpuworkers
 import abc
+from types import Uint, ActivFn
 #from .tensormultiprocessings import FunctMP
+
 
 def checkParamsProperties(model, sampleIn):
     model.zero_grad()
     tempout=model(sampleIn)
-    loss=nn.MSELoss()(tempout, torch.zeros_like(tempout))
+    loss=MSELoss()(tempout, torch.zeros_like(tempout))
     loss.backward()
     paramsgrads=[]
     for params in model.parameters():
@@ -41,16 +46,14 @@ def findlps(modelclass):
 # CNN, RNN, DLinear, NLinear, (Bi)LSTM|GRU, Transformer, vice versa are planned to add
 
 
-class NNModel(nn.Module):
-    def __init__(self, z, modelclass, nords_eachlayer_list, learnrate, activefunction=nn.ReLU):
-        nn.Module.__init__(self)
-        if not all(isinstance(n, int) and n > 0 for n in nords_eachlayer_list):
-            raise ValueError("only positive int")
+class NNModel(Module):
+    def __init__(self, z, modelclass, nords_eachlayer_list: Sequence[Uint], learnrate, activefunction: ActivFn=ReLU()):
         if nords_eachlayer_list[0]!=1 or nords_eachlayer_list[-1]!=1:
             raise ValueError("nords of in and out must be 1")
+        Module.__init__(self)
         self.wparams, self.bparams=findlps(modelclass)
         self.strinfo=nords_eachlayer_list
-        self.activF = activefunction()
+        self.activF = activefunction
         self.initlearnR=learnrate
         self.zt=z
         self.modelclass = modelclass
@@ -62,20 +65,20 @@ class NNModel(nn.Module):
     def forward(self):
         pass
     
-def layerFNN(nords_in, nords_out, activefunction=nn.ReLU, device=None):
+def layerFNN(nords_in, nords_out, activefunction: ActivFn=ReLU(), device=None):
     """
     General layer for convolutional neural networks (CNNs).
     """
-    return nn.Sequential(
-        nn.Linear(nords_in, nords_out, bias=True, dtype=torch.float64, device=device),
-        activefunction()
+    return Sequential(
+        Linear(nords_in, nords_out, bias=True, dtype=torch.float64, device=device),
+        activefunction
     )
 
-def layerCNN(nords_in, nords_out, kernel_size=3, stride=1, padding=0, activefunction=nn.ReLU, device=None):
+def layerCNN(nords_in, nords_out, kernel_size=3, stride=1, padding=0, activefunction: ActivFn=ReLU(), device=None):
     """
     General layer for convolutional neural networks (CNNs): kernel decides the near-grid matrix.
     """
-    return nn.Sequential(
-        nn.Conv2d(nords_in, nords_out, kernel_size=kernel_size, stride=stride, padding=padding, bias=True, dtype=torch.float64, device=device),
+    return Sequential(
+        Conv2d(nords_in, nords_out, kernel_size=kernel_size, stride=stride, padding=padding, bias=True, dtype=torch.float64, device=device),
         activefunction()
     )
